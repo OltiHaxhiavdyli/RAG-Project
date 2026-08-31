@@ -1,0 +1,34 @@
+[
+  {
+    "question": "What is RIT Kosovo's mission statement?",
+    "ground_truth": "RIT Kosovo is a community that holds high expectations for its students, committed to fostering an environment that encourages dialogue, learning, resilience, and accountability, with community members living and working together to create a positive learning atmosphere both inside and outside the classroom."
+  },
+  {
+    "question": "What are the minimum TOEFL and IELTS scores required for direct admission to RIT Kosovo?",
+    "ground_truth": "Internet Based TOEFL (iBT): 68, Paper Based TOEFL: 520, Computer Based TOEFL: 213, and IELTS: 6.5."
+  },
+  {
+    "question": "What is the deadline for the Alternative Admission Process, and what type of scholarship can students admitted this way apply for?",
+    "ground_truth": "The deadline is August 1, 2026. Students admitted through the Alternative Admission Process are only eligible to apply for need-based scholarships, not merit-based ones."
+  },
+  {
+    "question": "What courses does the TDI (Training and Development Institute) offer, and how many courses has it provided in total?",
+    "ground_truth": "TDI offers ICT Courses, Project & Business Management Courses, Language Courses, and Other Courses. It has provided over 180 courses and trained more than 50,000 individuals."
+  },
+  {
+    "question": "According to the RITK Student Government Constitution, what are the two branches that make up the Student Government?",
+    "ground_truth": "The Student Senate (legislative branch) and the Executive Committee (executive branch)."
+  },
+  {
+    "question": "Who must approve any use of the RITK Student Government's logo?",
+    "ground_truth": "Any usage of the logo needs to be approved by the president, the vice president, or a responsible delegate as decided by the president."
+  },
+  {
+    "question": "What happens to a student's scholarship if they accrue two 'W's on their transcript from withdrawing from courses?",
+    "ground_truth": "The scholarship is decreased by exactly half the original amount awarded for the remainder of the student's enrollment, and the student forfeits eligibility to apply for any future aid programs. If it is a multi-year scholarship, the reduced funding continues for subsequent years."
+  },
+  {
+    "question": "What undergraduate degree programs are listed on RIT Kosovo's undergraduate programs page?",
+    "ground_truth": "BSc in Individualized Program, BSc in Computing and Information Technologies, and BSc in Electrical Engineering Technology."
+  }
+]

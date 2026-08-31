@@ -1,0 +1,4 @@
+ticket_id,severity,summary
+TICK-001,high,Widget inspection line jammed
+TICK-002,low,Refund request stuck in queue
+TICK-003,medium,Shipping label printer offline

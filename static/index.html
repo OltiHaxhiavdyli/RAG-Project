@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RIT Kosovo RAG</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="status" id="status">Checking API...</div>
+      <button id="reingest-btn" type="button">Re-ingest local documents</button>
+      <button id="new-chat-btn" type="button">New conversation</button>
+    </aside>
+    <main class="chat">
+      <header>
+        <h1>RIT Kosovo RAG</h1>
+        <p class="subtitle">
+          Hybrid retrieval + query decomposition + self-correction over RIT
+          Kosovo's policies, calendars, and course data. Answers can take up
+          to ~90s — every technique in the pipeline runs on every question.
+        </p>
+      </header>
+      <div class="messages" id="messages"></div>
+      <form id="chat-form">
+        <input
+          id="question-input"
+          type="text"
+          placeholder="Ask about RIT Kosovo..."
+          autocomplete="off"
+        />
+        <button id="send-btn" type="submit">Send</button>
+        <button id="cancel-btn" type="button" hidden>Cancel</button>
+      </form>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
