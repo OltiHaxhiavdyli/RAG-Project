@@ -76,29 +76,34 @@ def _build_local_ensemble(store: Chroma) -> BaseRetriever:
 
 def build_hybrid_retriever(store: Chroma) -> BaseRetriever:
     """Composes:
-      0. a cheap upfront scope check (scope_gate.py), against the ORIGINAL
-         question only, once — not per sub-question. If the question clearly
-         doesn't relate to anything ingested, skip straight to web search
-         instead of paying for decomposition and a full retrieval pass on
-         every sub-question. Scoping a compound question as a whole is fine
-         here: the gate only needs "does ANY of this relate to something we
-         have", which a single pass answers correctly, unlike reranking/
-         correction below where favoring one half of the wording would
-         silently drop the other half's results.
-      1. query decomposition (query_analysis.py) — split into sub-questions
-         + one step-back question, each retrieved independently so a
-         compound question doesn't systematically starve out whichever half
-         is less prominent in the combined wording (confirmed against real
-         data — see ENGINEERING.md's Query analysis section). Itself gated by
-         a cheap needs_decomposition() check — an already-simple question
-         skips straight to a single retrieval pass on the original wording.
-      2. per (sub-)question: local retrieval (vector+BM25+self-query+parent-
-         document ensemble), reranked
-      3. per (sub-)question: graded for relevance (Corrective RAG) — only
-         falls back to a (also reranked) live web search if the local
-         results don't clear the relevance bar, instead of paying for a web
-         call on every query
-      4. all sub-question results merged/deduped
+      0. a cheap upfront combined check (scope_gate.py), against the
+         ORIGINAL question only, once — not per sub-question, and not as two
+         separate calls either. One structured-output LLM call answers both
+         "does this plausibly relate to anything ingested?" and "would this
+         benefit from decomposition/step-back?" together, since they're
+         independent questions about the same input. Scoping (and gating
+         decomposition on) a compound question as a whole is fine here: the
+         checks only need "does ANY of this relate to something we have" /
+         "would splitting THIS help", which a single pass answers correctly,
+         unlike reranking/correction below where favoring one half of the
+         wording would silently drop the other half's results.
+           - clearly out of scope -> straight to web search, nothing else
+             runs at all
+           - in scope, simple     -> single retrieval pass (step 2-3 below),
+             no decompose/step-back
+           - in scope, complex    -> query decomposition (query_analysis.py)
+             — split into sub-questions + one step-back question, each
+             retrieved independently so a compound question doesn't
+             systematically starve out whichever half is less prominent in
+             the combined wording (confirmed against real data — see
+             ENGINEERING.md's Query analysis section) — then steps 2-3 below,
+             per (sub-)question
+      2. local retrieval (vector+BM25+self-query+parent-document ensemble),
+         reranked
+      3. graded for relevance (Corrective RAG) — only falls back to a (also
+         reranked) live web search if the local results don't clear the
+         relevance bar, instead of paying for a web call on every query
+      4. (complex path only) all sub-question results merged/deduped
 
     Self-query construction inside the ensemble (step 2) is itself
     conditional — see self_query.py — skipped per-query when the question
@@ -113,5 +118,8 @@ def build_hybrid_retriever(store: Chroma) -> BaseRetriever:
 
     catalog = build_source_catalog(store)
     return ScopeGatedRetriever(
-        local_retriever=decomposing, web_retriever=web_reranked, catalog=catalog
+        simple_retriever=corrective,
+        complex_retriever=decomposing,
+        web_retriever=web_reranked,
+        catalog=catalog,
     )

@@ -50,17 +50,20 @@ A question comes in through one interface (CLI or API/web UI) and is
 **routed** to one of two independent paths:
 
 - **RAG over documents**: the question is rewritten in light of conversation
-  history, then **decomposed** into atomic sub-questions plus one broader
-  **step-back** question (skipped entirely for an already-simple question —
-  see [Query analysis](ENGINEERING.md#query-analysis)). Each first passes a
-  cheap **scope gate** — does it plausibly relate to anything actually
-  ingested, per a one-sentence auto-generated **source catalog**? If clearly
-  not, it skips straight to web search. Otherwise it's retrieved through a
-  hybrid of vector similarity, BM25 keyword search, **self-query** metadata
-  filtering, and **parent-document** retrieval, then reranked by a local
-  cross-encoder — all per (sub-)question, not once against the combined
-  question (see [Query analysis](ENGINEERING.md#query-analysis) for why that
-  distinction is load-bearing, not academic). The retrieved context is then
+  history, then passes one cheap combined **scope + decomposition check** —
+  does it plausibly relate to anything actually ingested, per a one-sentence
+  auto-generated **source catalog**, and would it benefit from being
+  **decomposed** into atomic sub-questions plus one broader **step-back**
+  question? (Both are one structured-output LLM call, not two — see
+  [Scope gate](ENGINEERING.md#scope-gate).) Clearly out of scope skips
+  straight to web search; simple and in-scope skips decomposition and
+  retrieves once; complex and in-scope decomposes first. Either way it's
+  retrieved through a hybrid of vector similarity, BM25 keyword search,
+  **self-query** metadata filtering, and **parent-document** retrieval, then
+  reranked by a local cross-encoder — per (sub-)question when there is
+  more than one, not once against the combined question (see
+  [Query analysis](ENGINEERING.md#query-analysis) for why that distinction
+  is load-bearing, not academic). The retrieved context is then
   **graded for relevance**; only if it falls short does the system fall back
   to a live web search, instead of either guessing or refusing. Results are
   merged, deduplicated, and answered with inline citations grounded in real
@@ -165,13 +168,14 @@ flowchart TD
     SQLAnswer --> Answer(["Answer"])
 
     Router -->|"vectorstore"| Reformulate["History-aware query<br/>reformulation"]
-    Reformulate --> ScopeGate{"Scope gate — checked ONCE<br/>plausibly related to ANY<br/>known source?"}
+    Reformulate --> ScopeGate{"Scope + decomposition gate<br/>ONE combined check, ONCE:<br/>in scope? needs decomposition?"}
 
-    ScopeGate -->|"clearly not"| WebOnly["Live web search → rerank"]
+    ScopeGate -->|"out of scope"| WebOnly["Live web search → rerank"]
     WebOnly --> Merge
 
-    ScopeGate -->|"yes / unsure"| Decompose["Query analysis: decomposition<br/>+ step-back — skipped if the<br/>question is already simple"]
-    Decompose --> PerSubQ["Per sub-/step-back question:<br/>vector + BM25 + conditional<br/>self-query + parent-document<br/>→ rerank"]
+    ScopeGate -->|"in scope, simple"| PerSubQ
+    ScopeGate -->|"in scope, complex"| Decompose["Query analysis:<br/>decomposition + step-back"]
+    Decompose --> PerSubQ["Per (sub-/step-back) question:<br/>vector + BM25 + conditional<br/>self-query + parent-document<br/>→ rerank"]
     PerSubQ --> Grade{"Grade relevance<br/>(C-RAG)"}
 
     Grade -->|"sufficient"| Merge["Merge + dedupe<br/>across sub-questions"]

@@ -1,6 +1,10 @@
-"""DecomposingRetriever tests. Mocks needs_decomposition()/decompose()/
-step_back() and the base retriever, so no API key or network access is
-needed."""
+"""DecomposingRetriever tests. Mocks decompose()/step_back() and the base
+retriever, so no API key or network access is needed.
+
+DecomposingRetriever always decomposes when invoked now — the decision of
+WHETHER to decompose happens upstream, in scope_gate.py's ScopeGatedRetriever
+(combined into the same call as the scope check). See test_scope_gate.py for
+that dispatch logic."""
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
@@ -30,7 +34,6 @@ class StubRetriever(BaseRetriever):
 
 
 def test_decomposing_retriever_merges_and_dedupes(monkeypatch):
-    monkeypatch.setattr(query_analysis, "needs_decomposition", lambda question: True)
     monkeypatch.setattr(
         query_analysis,
         "decompose",
@@ -47,7 +50,6 @@ def test_decomposing_retriever_merges_and_dedupes(monkeypatch):
 
 
 def test_decomposing_retriever_handles_single_subquestion(monkeypatch):
-    monkeypatch.setattr(query_analysis, "needs_decomposition", lambda question: True)
     monkeypatch.setattr(query_analysis, "decompose", lambda question: ["How long do refunds take?"])
     monkeypatch.setattr(query_analysis, "step_back", lambda question: question)  # no-op: dedupes away
 
@@ -58,7 +60,6 @@ def test_decomposing_retriever_handles_single_subquestion(monkeypatch):
 
 
 def test_decomposing_retriever_adds_step_back_question(monkeypatch):
-    monkeypatch.setattr(query_analysis, "needs_decomposition", lambda question: True)
     monkeypatch.setattr(query_analysis, "decompose", lambda question: ["How long do refunds take?"])
     monkeypatch.setattr(query_analysis, "step_back", lambda question: "What is the refund policy?")
 
@@ -76,7 +77,6 @@ def test_decomposing_retriever_adds_step_back_question(monkeypatch):
 
 
 def test_decomposing_retriever_skips_step_back_when_same_as_original(monkeypatch):
-    monkeypatch.setattr(query_analysis, "needs_decomposition", lambda question: True)
     monkeypatch.setattr(query_analysis, "decompose", lambda question: ["How long do refunds take?"])
     # step_back returns the ORIGINAL question unchanged (already general) — should not add a duplicate call
     monkeypatch.setattr(query_analysis, "step_back", lambda question: question)
@@ -92,36 +92,3 @@ def test_decomposing_retriever_skips_step_back_when_same_as_original(monkeypatch
     retriever.invoke("How long do refunds take?")
 
     assert calls == ["How long do refunds take?"]  # not called twice for the same question
-
-
-def test_decomposing_retriever_skips_decomposition_when_not_needed(monkeypatch):
-    monkeypatch.setattr(query_analysis, "needs_decomposition", lambda question: False)
-
-    def _fail_if_called(question):
-        raise AssertionError("decompose/step_back should not run when needs_decomposition says no")
-
-    monkeypatch.setattr(query_analysis, "decompose", _fail_if_called)
-    monkeypatch.setattr(query_analysis, "step_back", _fail_if_called)
-
-    retriever = DecomposingRetriever(base_retriever=StubRetriever())
-    docs = retriever.invoke("How long do refunds take?")
-
-    assert docs == [DOC_A]  # retrieved directly on the original question, single pass
-
-
-def test_decomposing_retriever_runs_decomposition_when_needed(monkeypatch):
-    """Complements the skip test above: the conservative default (True,
-    exercised throughout the other tests via explicit monkeypatching) is
-    real behavior, not just a mock default — confirmed here by actually
-    invoking needs_decomposition's caller with a distinguishable return."""
-    calls = []
-    monkeypatch.setattr(
-        query_analysis, "needs_decomposition", lambda question: calls.append(question) or True
-    )
-    monkeypatch.setattr(query_analysis, "decompose", lambda question: [question])
-    monkeypatch.setattr(query_analysis, "step_back", lambda question: question)
-
-    retriever = DecomposingRetriever(base_retriever=StubRetriever())
-    retriever.invoke("How long do refunds take?")
-
-    assert calls == ["How long do refunds take?"]  # the gate itself was actually consulted

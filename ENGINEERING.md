@@ -130,12 +130,18 @@ both in `src/rag/query_analysis.py`:
   already general), in which case it's skipped rather than wastefully
   retrieved twice.
 
-Both are gated by `needs_decomposition()` first — a cheap upfront check, same
-pattern as the scope gate: for an already-simple, self-contained question,
-decompose+step-back would just add two LLM calls and double the downstream
-retrieval/grading fan-out for no benefit. See
-[Performance](#performance) for how this gate's first version barely worked,
-and the real fix.
+Both are gated by `needs_decomposition()` — a cheap upfront check: for an
+already-simple, self-contained question, decompose+step-back would just add
+two LLM calls and double the downstream retrieval/grading fan-out for no
+benefit. That decision isn't made here anymore, though — it's decided once,
+upstream, by [the scope gate](#scope-gate), combined into the very same LLM
+call as the scope check (they're two independent yes/no questions about the
+same input). `DecomposingRetriever` itself now always decomposes when
+invoked; `needs_decomposition()` still lives in this file since it's a
+query-analysis concern, and the scope gate calls into it directly only for
+the rarer case where there's no catalog/web fallback to combine the check
+with. See [Performance](#performance) for how this gate's first version
+barely worked, and the real fix.
 
 Every resulting (sub-/step-back) question is retrieved independently through
 the same reranking retriever, and the results are merged + deduplicated.
@@ -239,14 +245,31 @@ to web search. If yes — or if there's nothing to check against yet — proceed
 with local retrieval exactly as before.
 
 It runs **once, against the original question, before decomposition** —
-`ScopeGatedRetriever` wraps `DecomposingRetriever`, not the other way
-around, so the check happens before any sub-questions exist, rather than
-once per sub-question after. Scoping a compound question as a whole is safe
-here (unlike reranking/correction, which genuinely need to run per
-sub-question — see [Query analysis](#query-analysis)): the gate only needs
-"does ANY of this relate to something we have," which a single pass answers
-correctly. For a clearly out-of-scope question this also means decomposition
-never runs at all, since there's nothing local left to decompose for.
+`ScopeGatedRetriever` dispatches to one of three retrievers (web-only,
+simple, or decomposing — see below), rather than being wrapped one level
+inside decomposition. Scoping a compound question as a whole is safe here
+(unlike reranking/correction, which genuinely need to run per sub-question —
+see [Query analysis](#query-analysis)): the gate only needs "does ANY of
+this relate to something we have," which a single pass answers correctly.
+For a clearly out-of-scope question this also means decomposition never
+runs at all, since there's nothing local left to decompose for.
+
+**The scope check and the decomposition check are the same LLM call, not
+two.** `check_scope_and_decomposition()` asks both independent yes/no
+questions (in scope? worth decomposing?) about the same input in one
+structured-output round trip — the same fix already applied once to the two
+self-correction checks (see [Self-correcting generation](#self-correcting-generation)),
+applied here to save a second sequential round trip on every in-scope
+question. `ScopeGatedRetriever` then dispatches on both answers at once:
+out of scope → `web_retriever` directly; in scope and simple →
+`simple_retriever` (no decompose/step-back); in scope and complex →
+`complex_retriever` (`DecomposingRetriever`, which — now that the decision
+was already made upstream — always decomposes when invoked, rather than
+checking for itself). The combined call is skipped entirely (falling back
+to asking `needs_decomposition()` alone) when there's nothing to gate
+against (empty catalog) or nowhere to fall back to (no web retriever
+configured) — in both cases a decomposition decision is still needed, just
+not combined with a scope check that wouldn't mean anything.
 
 This is a **latency/cost optimization layered on top of Corrective RAG, not
 a replacement for it**. The two catch different failure modes: the scope
@@ -256,14 +279,17 @@ covered, but the actual retrieved content wasn't good enough" — a case the
 scope gate can't see coming, since it never looks at real content, only
 short descriptions.
 
-Deliberately biased toward false positives, not false negatives: the prompt
-explicitly says to default to "in scope" whenever unsure, and an empty
-catalog (nothing ingested yet) always passes through unchecked. A wrongly
-"in scope" question just costs one extra retrieval-and-grade pass that
-Corrective RAG already handles correctly; a wrongly "out of scope" question
-would skip local content that actually had the answer — a real correctness
-regression, not just wasted cost. Cheap mistakes are fine here; the other
-kind isn't.
+Deliberately biased toward false positives on both axes, not false
+negatives: the prompt explicitly says to default to "in scope" and "needs
+decomposition" whenever unsure, and an empty catalog (nothing ingested yet)
+always passes scope through unchecked. A wrongly "in scope" question just
+costs one extra retrieval-and-grade pass that Corrective RAG already
+handles correctly; a wrongly "out of scope" question would skip local
+content that actually had the answer — a real correctness regression, not
+just wasted cost. Same shape for decomposition: wrongly skipping it for a
+question that needed it is a real answer-quality regression, wrongly
+running it just costs latency. Cheap mistakes are fine here; the other kind
+isn't.
 
 **Verified against real data**: asking about the Student Government
 constitution correctly classified as in-scope. Asking for a lasagna recipe
@@ -271,10 +297,15 @@ and asking who won the most recent Formula 1 championship both correctly
 classified as out-of-scope — and, run through the full pipeline, the lasagna
 question returned an answer sourced *entirely* from real recipe websites
 (zero RIT Kosovo sources cited), confirming local retrieval was skipped
-entirely rather than run and simply come up empty. Separately, profiling
-"What is the capital of France?" after the scope-gate-runs-once change
-showed exactly one `check_scope` call and zero `decompose`/`step_back`
-calls (11.7s total), confirming decomposition genuinely never ran.
+entirely rather than run and simply come up empty. Separately, profiling a
+simple in-scope question after the merge shows exactly one
+`check_scope_and_decomposition` call and zero fallback-path
+`needs_decomposition` calls (4 tracked calls total, down from 5) — confirmed
+the merge is actually happening, not just theoretically wired up — and a
+compound question profiled the same way correctly shows the combined call
+firing once, followed by real `decompose`/`step_back`/multi-question
+`grade_relevance` calls, proving the complex-question dispatch path still
+works end to end. See [Performance](#performance) for the numbers.
 
 ## Parent-document retrieval
 
@@ -615,6 +646,31 @@ regeneration on one, and a narrow-named-entity question that correctly
 small added cost paid by every question, compound or not, and only pays for
 itself on the genuinely-simple ones. The per-question profiler evidence
 above is the real signal here, not that median.
+
+**A seventh change: the scope check and the decomposition check are now one
+call, not two.** Items 4 and 6 above shipped as two separate upfront
+classifiers — `check_scope()` deciding scope, `needs_decomposition()`
+deciding decomposition — run sequentially, one after the other, on every
+in-scope question. They're independent yes/no questions about the same
+input, which is exactly the shape that already justified merging the two
+self-correction checks into `grade_answer()` earlier in this list; the same
+fix applies here. `check_scope_and_decomposition()`
+([Scope gate](#scope-gate)) now answers both in one structured-output call,
+and `ScopeGatedRetriever` dispatches directly on both answers — out of
+scope, in-scope-simple, or in-scope-complex — instead of nesting a
+decomposition-gated retriever inside a scope-gated one.
+
+Verified directly, not assumed: profiling "What is RIT Kosovo's mission
+statement?" (a simple, in-scope question) after the merge shows exactly one
+`check_scope_and_decomposition` call and zero calls to the fallback-path
+`needs_decomposition` — 4 tracked grader/analysis calls total (router,
+combined gate, corrective relevance grade, answer grade), down from 5
+before the merge. A compound question profiled the same way confirms the
+complex path still dispatches correctly: the combined call fires once,
+followed by real `decompose` and `step_back` calls and three
+`grade_relevance` calls (one per resulting sub-/step-back question) — the
+merge changes *how many calls decide what to do*, not what the pipeline
+actually does once it's decided.
 
 ## Web UI internals
 

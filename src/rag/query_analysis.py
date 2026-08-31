@@ -15,15 +15,15 @@ Every (sub-)question generated here is retrieved independently through
 `base_retriever` (which reranks per-query — see retrieval.py), and the
 results are pooled and deduplicated.
 
-Both are gated by needs_decomposition() first — a cheap upfront check, same
-pattern as scope_gate.py: for an already-simple, self-contained question,
-decompose+step_back would just add two LLM calls and double the downstream
-retrieval/grading fan-out for no benefit (decompose's own atomicity check
-already collapses to [question] in that case, but step-back still ran
-regardless before this gate existed). Conservative like scope_gate: default
-to YES (run decomposition) whenever unsure, since wrongly skipping it for a
-question that needed it is a real answer-quality regression, while running
-it unnecessarily only costs latency."""
+Both are gated by needs_decomposition() below — but that gate is no longer
+checked HERE: it's decided once, upstream, by scope_gate.py's
+ScopeGatedRetriever, combined into the same LLM call as the scope check
+(two independent yes/no questions about the same input, one round trip
+instead of two). DecomposingRetriever itself now always decomposes when
+invoked — its caller already decided it was worth it. needs_decomposition()
+still lives here since it's about query analysis, and scope_gate.py calls
+into it directly for the (rarer) case where there's no catalog/web fallback
+to combine the check with."""
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 
@@ -142,9 +142,6 @@ class DecomposingRetriever(BaseRetriever):
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> list[Document]:
-        if not needs_decomposition(query):
-            return self.base_retriever.invoke(query)
-
         with ThreadPoolExecutor(max_workers=2) as pool:
             decompose_future = pool.submit(decompose, query)
             step_back_future = pool.submit(step_back, query)
