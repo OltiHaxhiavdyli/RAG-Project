@@ -189,7 +189,7 @@ class ChatSession:
                 # SQL, a rejected unsafe statement, a real DB error — and
                 # none of those should crash the whole session. Fall back to
                 # the RAG path for this same question instead (real bug,
-                # found and fixed: see README's Text-to-SQL notes).
+                # found and fixed: see ENGINEERING.md's Text-to-SQL notes).
                 answer, context, sources = self._ask_vectorstore(question, on_stage)
                 route = "vectorstore"
         else:

@@ -13,7 +13,8 @@ from src import config
 # ONLY page_content, never metadata — so without this, an instruction to
 # "cite [source: <name>]" has no real source name to draw on, and the model
 # fabricates a plausible-looking one from whatever text happens to be in the
-# chunk (a real, reproduced bug — see README's Corrective RAG section). This
+# chunk (a real, reproduced bug — see ENGINEERING.md's Notes on design
+# choices section). This
 # tags every passage with its actual source before the model ever sees it.
 DOCUMENT_PROMPT = PromptTemplate.from_template("[source: {source}]\n{page_content}")
 

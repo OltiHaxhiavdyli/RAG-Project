@@ -17,7 +17,8 @@ def _stable_chunk_id(source: str, page_content: str) -> str:
     reproduced against the live store: re-running `ingest` (even just to
     add two new URLs, since it also unconditionally re-scans data/raw)
     duplicated 1340 of 1515 existing chunks, because Chroma was never told
-    two additions were "the same" chunk. See README's ingestion section."""
+    two additions were "the same" chunk. See ENGINEERING.md's Notes on
+    design choices section."""
     return hashlib.sha256(f"{source}::{page_content}".encode("utf-8")).hexdigest()
 
 

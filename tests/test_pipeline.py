@@ -48,7 +48,7 @@ def test_ingest_and_query(tmp_path, monkeypatch):
 def test_sql_failure_falls_back_to_vectorstore_gracefully(tmp_path, monkeypatch):
     """Regression test for a real crash: a malformed/rejected SQL query used
     to propagate all the way up and kill the whole session instead of
-    degrading gracefully. See README's Text-to-SQL section."""
+    degrading gracefully. See ENGINEERING.md's Text-to-SQL section."""
     import importlib
 
     monkeypatch.setenv("CHROMA_PERSIST_DIR", str(tmp_path / ".chroma"))

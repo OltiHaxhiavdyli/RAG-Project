@@ -89,7 +89,7 @@ def build_hybrid_retriever(store: Chroma) -> BaseRetriever:
          + one step-back question, each retrieved independently so a
          compound question doesn't systematically starve out whichever half
          is less prominent in the combined wording (confirmed against real
-         data — see README's Query decomposition section). Itself gated by
+         data — see ENGINEERING.md's Query analysis section). Itself gated by
          a cheap needs_decomposition() check — an already-simple question
          skips straight to a single retrieval pass on the original wording.
       2. per (sub-)question: local retrieval (vector+BM25+self-query+parent-
