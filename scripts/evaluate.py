@@ -8,7 +8,14 @@ import argparse
 import json
 import sys
 import types
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+# Generous ceiling, not a target: a normal question takes ~30-45s, and the
+# self-correction loop can legitimately push a slow one well past that
+# (regenerate + re-verify, or a question rewrite triggering fresh
+# retrieval). This only exists to break a genuinely hung network call.
+QUESTION_TIMEOUT_SECONDS = 300
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -48,10 +55,49 @@ def run_eval(dataset_path: Path) -> None:
 
     cases = json.loads(dataset_path.read_text(encoding="utf-8"))
 
-    rows = []
-    for case in cases:
-        session = ChatSession()  # fresh session per question: no cross-question memory leakage
-        result = session.ask(case["question"])
+    # ONE session, history cleared between questions — not a fresh session per
+    # question. Both give the same isolation (no cross-question memory), but a
+    # fresh session re-pays the full ~13-90s cold build every time: loading
+    # every document for the BM25 index, the cross-encoder, the source
+    # catalog. That's the same measurement artifact already fixed in the
+    # latency benchmarks (see ENGINEERING.md's Performance section), which
+    # this script had independently reintroduced. It made a 16-question run
+    # take 30+ minutes, which in turn made expanding the dataset — the actual
+    # fix for the metrics being too noisy to interpret — impractically slow.
+    session = ChatSession()
+
+    # One flaky question must not discard the whole run. Found the hard way:
+    # a transient httpx.RemoteProtocolError on question 40 of 40 threw away
+    # ~20 minutes of completed API work, which is exactly the failure mode
+    # that makes larger eval sets impractical — and larger sets are the whole
+    # point of tightening the confidence intervals below. Matches the
+    # "skip, don't crash" posture the rest of this project already has
+    # (SafeRetriever, the SQL-path fallback, the corrective/scope-gate
+    # fallbacks); this script was the one place that didn't.
+    rows, failed = [], []
+    for i, case in enumerate(cases, 1):
+        session.history.clear()
+        try:
+            # Run in a worker so a HUNG call is survivable, not just a
+            # failing one. A raised exception is catchable; a network call
+            # that never returns is not, and both were hit for real running
+            # this exact script — one run died on a RemoteProtocolError, a
+            # later one simply stopped advancing at question 21 and never
+            # resumed. Without a timeout the second case can't be recovered
+            # from at all, which makes a large eval set impossible to
+            # actually finish.
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                result = pool.submit(session.ask, case["question"]).result(
+                    timeout=QUESTION_TIMEOUT_SECONDS
+                )
+        except Exception as exc:  # noqa: BLE001 — any transport/API/timeout failure
+            failed.append((case["question"], type(exc).__name__))
+            print(
+                f"  [{i}/{len(cases)}] SKIPPED ({type(exc).__name__}): {case['question'][:50]}",
+                flush=True,
+            )
+            continue
+        print(f"  [{i}/{len(cases)}] {case['question'][:60]}", flush=True)
         rows.append(
             {
                 "user_input": case["question"],
@@ -60,6 +106,18 @@ def run_eval(dataset_path: Path) -> None:
                 "reference": case["ground_truth"],
             }
         )
+
+    if failed:
+        # Reported loudly, never silently: a quietly-dropped row is how an
+        # earlier run of this script reported 7 scores for 8 questions.
+        print(f"\n!! {len(failed)} of {len(cases)} questions failed and are EXCLUDED:")
+        for question, exc_name in failed:
+            print(f"   - [{exc_name}] {question[:70]}")
+        print("   Scores below cover only the questions that completed.")
+
+    if not rows:
+        print("\nEvery question failed — nothing to score.")
+        return
 
     eval_dataset = EvaluationDataset.from_list(rows)
 
@@ -85,9 +143,42 @@ def run_eval(dataset_path: Path) -> None:
     )
 
     df = report.to_pandas()
-    print(df.to_string(index=False))
-    print("\nMean scores:")
-    print(df[["faithfulness", "answer_relevancy", "context_precision", "context_recall"]].mean())
+    _print_scores(df)
+
+
+METRIC_COLUMNS = ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
+
+
+def _print_scores(df) -> None:
+    """Report mean +- 95% confidence interval, not a bare mean.
+
+    Bare means are how this project spent two runs unable to say whether
+    faithfulness 0.93 -> 0.86 meant anything. With per-question scores in
+    hand the answer is computable: the standard error of the mean is
+    std/sqrt(n), so a shift smaller than roughly +-1.96*SEM is
+    indistinguishable from which questions happened to land which way. The
+    "min detectable shift" column makes that explicit, so a future run can
+    be judged instead of squinted at. Also prints n, since all of this
+    tightens with more questions and that's the real lever."""
+    n = len(df)
+    print(f"\nScores over {n} questions (mean +- 95% CI):\n")
+    print(f"{'metric':<20} {'mean':>6}  {'95% CI':>16}  {'min detectable shift':>21}")
+    print("-" * 70)
+    for col in METRIC_COLUMNS:
+        scores = df[col].dropna()
+        mean = scores.mean()
+        # ddof=1: sample std, not population — these questions are a sample
+        # of possible questions, not the whole universe of them.
+        sem = scores.std(ddof=1) / (len(scores) ** 0.5) if len(scores) > 1 else float("nan")
+        half = 1.96 * sem
+        print(
+            f"{col:<20} {mean:>6.3f}  [{max(0.0, mean - half):.3f}, {min(1.0, mean + half):.3f}]"
+            f"  {half:>19.3f}"
+        )
+    print(
+        "\nA run-to-run change smaller than the last column is not evidence of "
+        "anything.\nShrink it by adding questions: the interval narrows with sqrt(n)."
+    )
 
 
 if __name__ == "__main__":

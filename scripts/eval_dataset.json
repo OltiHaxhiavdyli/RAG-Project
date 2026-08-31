@@ -56,11 +56,107 @@
     "ground_truth": "A 3.9% interest rate, a loan maturity of 5 years (60 months), and a 0% loan administration fee."
   },
   {
-    "question": "How many current students does RIT Kosovo have, and what percentage of them are international?",
-    "ground_truth": "RIT Kosovo has 750+ current undergraduate and graduate students, of whom about 20% are international."
+    "question": "How many current students does RIT Kosovo have?",
+    "ground_truth": "750+ current undergraduate and graduate students."
   },
   {
     "question": "What graduate degree programs are listed on RIT Kosovo's Graduate Programs page?",
     "ground_truth": "MSc in Professional Studies: Data Analytics, and Post-doctoral Studies."
+  },
+  {
+    "question": "How many total credits does an immersion at RIT Kosovo require?",
+    "ground_truth": "9 credits."
+  },
+  {
+    "question": "What is the required course for the Legal Studies Immersion, and how many electives must a student choose?",
+    "ground_truth": "POLS-200, Law and Politics, is the required course, and students choose two electives."
+  },
+  {
+    "question": "What is the required course for the Public Policy Immersion at RIT Kosovo?",
+    "ground_truth": "PUBL-101, Foundations of Public Policy."
+  },
+  {
+    "question": "What is the prerequisite course for the Psychology Immersion at RIT Kosovo?",
+    "ground_truth": "PSYC-101, Introduction to Psychology."
+  },
+  {
+    "question": "Which students is the Economics Immersion closed to?",
+    "ground_truth": "It is closed to students with a sub-plan in Economics and Statistics."
+  },
+  {
+    "question": "Are Political Science immersion students allowed to take POLS Special Topic classes?",
+    "ground_truth": "No. Political Science immersion students are not eligible to take POLS Special Topic classes, including 'Political Science (Humanitarian, Development, & Peace Nexus)', which is only available to students pursuing a minor in Political Science."
+  },
+  {
+    "question": "What scholarship award amount corresponds to a 4.0 GPA under RIT Kosovo's Student Scholarship Program?",
+    "ground_truth": "2,000 EUR."
+  },
+  {
+    "question": "What is the scholarship award for a GPA between 3.6 and 3.69 at RIT Kosovo?",
+    "ground_truth": "1,000 EUR."
+  },
+  {
+    "question": "How many merit-based scholarships can an RIT Kosovo student receive at one time?",
+    "ground_truth": "Only one. If a student is a recipient of multiple merit-based scholarships they may select only one from among them."
+  },
+  {
+    "question": "What happens if an RIT Kosovo student does not apply for the Student Scholarship award in a given year?",
+    "ground_truth": "The student will receive no scholarship at all. Students must apply each year."
+  },
+  {
+    "question": "How many Best in Generation Scholarships does RIT Kosovo award, and what is each one worth?",
+    "ground_truth": "Six scholarships, each worth 3,300 EUR."
+  },
+  {
+    "question": "What GPA is required to be eligible for RIT Kosovo's Outstanding Student Scholarship?",
+    "ground_truth": "A GPA of 3.85 or higher."
+  },
+  {
+    "question": "What GPA is required for RIT Kosovo's Ambassadors Scholarship, and how many withdrawals or retakes are allowed?",
+    "ground_truth": "A GPA of 3.6 or higher, with no more than one withdrawal or retake from classes."
+  },
+  {
+    "question": "What GPA is required for RIT Kosovo's Financial Support Scholarship?",
+    "ground_truth": "A GPA of 3.0 or higher, along with proof of financial sources."
+  },
+  {
+    "question": "When is the application deadline for RIT Kosovo's Sports Scholarship?",
+    "ground_truth": "There is no fixed deadline. Applications are accepted continuously and scholarships are awarded until the scholarship fund is depleted, with early submissions strongly encouraged."
+  },
+  {
+    "question": "Which bank does RIT Kosovo have a student loan agreement with?",
+    "ground_truth": "ProCredit Bank."
+  },
+  {
+    "question": "What is the student-to-faculty ratio at RIT Kosovo?",
+    "ground_truth": "16:1."
+  },
+  {
+    "question": "How many degrees and professional sub-plans does RIT Kosovo offer?",
+    "ground_truth": "4 degrees and 10 professional sub-plans, each with at least 15 credit hours in a thematic or discipline-based area of study."
+  },
+  {
+    "question": "How many students have graduated from RIT Kosovo, and across how many graduated classes?",
+    "ground_truth": "2,404 students in Kosovo and abroad have graduated, across 21 graduated classes."
+  },
+  {
+    "question": "What GPA and how many credit hours are required for RIT's Outstanding Undergraduate Scholar Award?",
+    "ground_truth": "A minimum grade point average of 3.85 out of 4.0 and completion of 83 credit hours of study, which is more than two-thirds of the credit hours required for a baccalaureate degree."
+  },
+  {
+    "question": "What GPA makes a student eligible to apply for RIT's Excellence in Student Life Award?",
+    "ground_truth": "A GPA of 3.4 or higher."
+  },
+  {
+    "question": "How many individuals has RIT Kosovo's TDI trained and certified?",
+    "ground_truth": "TDI has trained over 50,000 individuals and certified more than 30,000 individuals, and has served over 500 businesses."
+  },
+  {
+    "question": "Which certification and exam providers is RIT Kosovo's TDI Testing Center authorized for?",
+    "ground_truth": "The European Computer Driving License (ECDL), European Business Competence License (EBCL), ETS TOEFL and GMAT, Pearson VUE, Prometric, and Android."
+  },
+  {
+    "question": "What minors are available at RIT Kosovo, and in which year do students select one?",
+    "ground_truth": "Anthropology and Sociology, Economics, International Relations, Legal Studies, and Literature. Students select a minor in their Junior (3rd) year as part of their individualized course of study."
   }
 ]
