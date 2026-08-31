@@ -380,19 +380,36 @@ figures, each correctly cited by URL — local retrieval graded insufficient,
 correction kicked in, and the model didn't hallucinate a number or refuse to
 answer.
 
-**A precision gap worth being honest about**: the `sources` field returned
-alongside the answer is computed from *every* document retrieved across all
-sub-questions, not just the ones the answer actually cited. Because
-correction runs per (sub-/step-back) question independently, the mission
-statement example above still lists a few generic "what is a mission
-statement" web pages in `sources` — the auto-generated **step-back**
-question ("what is a mission statement in general?") doesn't get answered by
-the handbook either, so *that* sub-question's own correction pass pulled in
-web results, even though the original question didn't need them. The model
-correctly ignored those when writing the answer (confirmed: zero inline
-citations to them), but `sources` doesn't yet distinguish "retrieved" from
-"actually used." Fixable by deriving `sources` from the citations parsed out
-of the generated answer instead of the raw context list — not yet done.
+**A precision gap that used to exist here, now fixed**: the `sources` field
+returned alongside the answer used to be computed from *every* document
+retrieved across all sub-questions, not just the ones the answer actually
+cited. Because correction runs per (sub-/step-back) question independently,
+the mission statement example above used to still list a few generic "what
+is a mission statement" web pages in `sources` — the auto-generated
+**step-back** question ("what is a mission statement in general?") doesn't
+get answered by the handbook either, so *that* sub-question's own
+correction pass pulled in web results, even though the original question
+didn't need them. The model correctly ignored those when writing the answer
+(confirmed: zero inline citations to them), but `sources` didn't
+distinguish "retrieved" from "actually used."
+
+Fixed by `pipeline.py`'s `_cited_sources()`: parses the literal
+`[source: ...]` tags the model is required to copy exactly (see
+`chain.py`'s `DOCUMENT_PROMPT`/`ANSWER_PROMPT`) out of the generated answer
+text, intersected against the real retrieved sources as a guard against a
+malformed or hallucinated tag. Re-ran the exact mission-statement question
+that originally surfaced this: `sources` now returns exactly
+`['Student Handbook (Code of Conduct)_RIT Kosovo.pdf']` — none of the
+generic step-back web pages, matching what the answer actually cites.
+Covered by pure-logic tests in
+[`test_pipeline_helpers.py`](tests/test_pipeline_helpers.py) (deliberately
+kept out of `test_pipeline.py`, which is module-skipped without
+`GOOGLE_API_KEY` — this needed no credentials and should always run,
+including in CI). Deliberately does NOT fall back to "all retrieved
+sources" when nothing parses (e.g. an honest "the context doesn't cover
+this" answer legitimately cites nothing) — that fallback would just
+reintroduce the same bug for that case; an empty `sources` list is the
+correct, honest answer there.
 
 ## Self-correcting generation
 
@@ -481,34 +498,88 @@ python scripts/evaluate.py
 
 Runs the questions in `scripts/eval_dataset.json` through the full pipeline
 and scores faithfulness, answer relevancy, context precision, and context
-recall with RAGAS. The dataset is 8 real questions with ground-truth answers
-pulled directly from the raw ingested text (not from the model's own prior
-answers, to avoid the eval grading itself), spanning all three PDFs and two
-web pages.
+recall with RAGAS. The dataset is 16 real questions with ground-truth
+answers pulled directly from the raw ingested text (not from the model's
+own prior answers, to avoid the eval grading itself), spanning both PDFs,
+the constitution, and 8 different web pages — expanded from an original 8,
+deliberately drawing the new 8 from sources the first set never touched
+(immersions, scholarships-and-loans, academics overview, graduate programs)
+rather than just adding more of the same, so the expansion buys real
+coverage breadth, not just row count.
 
-**Real scores from a real run, all 8 questions scored**: faithfulness 0.84,
-answer relevancy 0.86, context precision 0.77, context recall 1.00. Reading
-the per-question breakdown rather than just the mean surfaced two things
-worth being honest about, not smoothing over:
+**Real scores from a real run, all 16 questions scored**: faithfulness
+0.93, answer relevancy 0.87, context precision 0.66, context recall 0.88 —
+up from the original 8-question run's 0.84/0.86/0.77/1.00 on faithfulness
+and relevancy, down on precision and recall. That's not noise to explain
+away; reading the per-question breakdown (not just the mean) found a real,
+concrete reason, on top of the two already-known ones below:
 
-- One question scored faithfulness 0.25 despite the answer being a
-  near-verbatim, clearly-supported restatement of the retrieved passage — an
-  LLM-as-judge artifact (RAGAS's own faithfulness check is itself an LLM
-  call, and can be inconsistent on short, simple answers), not an actual
-  grounding failure. Worth knowing this metric has its own noise floor,
-  rather than treating every number as gospel.
-- One question ("minimum TOEFL/IELTS scores") scored context precision 0.5
-  and faithfulness 0.33 because its retrieved context included a completely
-  unrelated university's admissions table pulled in from the web — a live,
-  concrete instance of the exact behavior documented in
-  [Corrective RAG](#corrective-rag-c-rag): the auto-generated step-back
-  question ("what are typical admission score requirements?") is broad
-  enough that *its own* local retrieval came up short, triggering *that*
-  sub-question's independent web fallback, even though the original question
-  was answered perfectly well locally. The final answer was still correct
-  (the model correctly ignored the noise) — but it's a real cost of
-  decomposition + per-sub-question correction: extra, irrelevant context can
-  leak into the pool even when the actual answer never needed it.
+- **A genuine retrieval regression, caught by the eval, not assumed away**:
+  the "two W's" scholarship-reduction question — part of the original 8,
+  which scored context recall 1.00 as a whole then — now retrieves *zero*
+  local documents and answers entirely from 5 generic US financial-aid
+  websites (collegeraptor.com, a Wichita State KB article, UT Austin, Ohio
+  State, bold.org) instead of the real, correct, still-present
+  `WithdrawalForScholarships.pdf`. Confirmed directly by asking the exact
+  question again outside the eval harness — same result, not a fluke. The
+  document didn't go anywhere (verified: still 2 chunks in the store); the
+  most likely cause is corpus growth diluting it out — the vector store
+  grew from ~10 sources at the time of the original eval to 21 now
+  (`minors`, `immersions`, `scholarships-and-loans`, `financial-office`,
+  and others added since), several of which now also discuss
+  scholarship-adjacent topics, and a 2-chunk PDF has little weight against
+  a much larger, more crowded field competing for the same top-K retrieval
+  slots. Corrective RAG's web fallback then did exactly what it's designed
+  to do when local retrieval looks insufficient — it just triggered for
+  the wrong reason here, on a question local content actually answers.
+  Not fixed in this pass — recorded here as a genuine, current gap rather
+  than silently patched or left undocumented: the honest fix is likely
+  revisiting `RETRIEVER_TOP_K`/reranking sensitivity as the corpus keeps
+  growing, not a one-off patch for this single question.
+- **A citation-format gap in my own new code, found by the same run**:
+  the answer to that same question cited its (wrong) web sources as bare
+  `[https://...]`, not the `[source: https://...]` format
+  `ANSWER_PROMPT` asks for. `pipeline.py`'s new `_cited_sources()` (see
+  [Self-correcting generation](#self-correcting-generation)) originally
+  required the exact `[source: ...]` prefix and would have silently
+  under-reported real citations for any answer shaped like this one —
+  fixed to accept a bare `[X]` too, both intersected against the real
+  retrieved sources for safety. Found and fixed in the same pass this eval
+  expansion surfaced it in, with a regression test.
+
+Reading the per-question breakdown rather than just the mean also
+reconfirmed the same two *phenomena* flagged in the original 8-question
+run — worth being precise here rather than implying they're literally the
+same rows scoring the same way twice, which they're not:
+
+- The original run flagged one question at faithfulness 0.25 as an
+  LLM-as-judge artifact on a short, clearly-correct answer (RAGAS's own
+  faithfulness check is itself an LLM call, and can be inconsistent on
+  short answers) rather than a real grounding failure. That exact row isn't
+  reproducible run-to-run to check directly, but the same pattern showed up
+  again here on a different question: "What is the required course for the
+  International Relations Immersion?" (ground truth: a single short fact,
+  "POLS-120, Introduction to International Relations") scored faithfulness
+  **0.0** despite context precision 0.37 and context recall 1.00 — i.e. the
+  right content WAS retrieved, which is inconsistent with a real
+  hallucination and consistent with the same short-answer judge noise as
+  before. Not re-verified line-by-line against the raw answer text this
+  time, so held as "consistent with the known pattern," not re-proven from
+  scratch.
+- The original run flagged one question (TOEFL/IELTS scores) at context
+  precision 0.5 because a step-back sub-question's independent web fallback
+  leaked irrelevant context into the pool (see
+  [Corrective RAG](#corrective-rag-c-rag)) — a real cost of decomposition +
+  per-sub-question correction, not a one-off. That exact question actually
+  scored a clean 1.0 on precision this run (LLM/retrieval non-determinism —
+  the same question doesn't always decompose or fall back to the web the
+  same way twice), but the same mechanism reproduced on two different
+  questions instead: "the deadline for the Alternative Admission Process"
+  and "what courses does the TDI offer" both scored context precision 0.5.
+  Not individually root-caused per-row here — the point isn't that these
+  exact two rows are special, it's that this leakage keeps showing up on
+  *some* question every run, which is the real, load-bearing finding, not
+  which specific question it lands on this time.
 
 **A second real dependency bug found running this**: `ragas` (0.4.3, the
 latest release) fails to import at all on the current `langchain-community`
@@ -538,6 +609,19 @@ enough to also strip the one row whose scraped web content happened to
 contain the word "return" somewhere in it, producing a false "still only 7
 rows" result on the first re-check. Re-verified against a completely
 unfiltered capture before trusting the fix.
+
+**A known, not-yet-fixed inefficiency, noticed running the expanded set**:
+`run_eval()` builds a **fresh `ChatSession` per question** — the exact same
+"measurement artifact" already caught and fixed in the latency-benchmarking
+scripts (see [Performance](#performance)), reintroduced here independently
+since this script was never touched during that fix. With 16 questions each
+separately paying the ~13-90s cold-build cost, the eval run itself took
+over 30 minutes. Deliberately not fixed in this pass: doing so safely means
+reusing one session and clearing `.history` between questions (the same
+pattern `bench.py` used), which would require re-running the full eval
+again just to confirm nothing about the *results* changed — a real cost
+worth paying at some point, but not worth spending on a pure speed
+improvement to a script the results of this exact run already stand on.
 
 ## Performance
 

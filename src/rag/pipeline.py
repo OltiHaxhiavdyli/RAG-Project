@@ -1,10 +1,12 @@
 """High-level RAG operations: ingest documents, run conversational queries."""
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage
 
 from src import config
@@ -18,6 +20,33 @@ from src.rag.router import route_question
 from src.rag.vectorstore import add_documents, get_vectorstore
 
 _NOOP_STAGE: Callable[[str], None] = lambda stage: None
+
+_CITATION_PATTERN = re.compile(r"\[(?:source:\s*)?([^\]]+)\]")
+
+
+def _cited_sources(answer: str, context: list[Document]) -> list[str]:
+    """Sources actually cited in the generated answer, not every document
+    retrieved for it. Corrective RAG grades relevance per (sub-/step-back)
+    question independently, not against the final answer — a broad
+    step-back question can pull in a source the model correctly never ends
+    up citing (a real, observed case: a "what is a mission statement in
+    general?" step-back question pulled in generic web pages the model
+    rightly ignored, but the old `{doc.metadata["source"] for doc in
+    context}` computation reported them as sources anyway — see
+    ENGINEERING.md's Corrective RAG section). Parses the `[source: ...]`
+    tags chain.py's DOCUMENT_PROMPT asks the model to copy exactly — but
+    also accepts a bare `[X]` with no "source:" prefix, found live running
+    the expanded RAGAS eval: the model doesn't always keep the prefix when
+    citing a web URL, dropping it to just `[https://...]`. Rejecting that
+    outright would silently under-report real citations, which is exactly
+    the kind of "looks fine, is quietly wrong" bug this function exists to
+    avoid. Either form is intersected against the real retrieved sources as
+    a guard against a malformed or hallucinated tag slipping through (the
+    self-correction hallucination check should already catch that case, but
+    this doesn't have to trust it blindly to stay correct)."""
+    cited = {m.strip() for m in _CITATION_PATTERN.findall(answer)}
+    known = {doc.metadata.get("source", "unknown") for doc in context}
+    return sorted(cited & known)
 
 
 class _RetrievalDoneCallback(BaseCallbackHandler):
@@ -169,8 +198,7 @@ class ChatSession:
                 on_stage("rewriting_question")
                 current_question = self_correction.rewrite_question(current_question)
 
-        sources = sorted({doc.metadata.get("source", "unknown") for doc in context})
-        return answer, context, sources
+        return answer, context, _cited_sources(answer, context)
 
     def ask(self, question: str, on_stage: Callable[[str], None] = _NOOP_STAGE) -> dict:
         on_stage("routing")

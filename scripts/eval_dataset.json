@@ -30,5 +30,37 @@
   {
     "question": "What undergraduate degree programs are listed on RIT Kosovo's undergraduate programs page?",
     "ground_truth": "BSc in Individualized Program, BSc in Computing and Information Technologies, and BSc in Electrical Engineering Technology."
+  },
+  {
+    "question": "What is an immersion at RIT Kosovo, and how many courses does it consist of?",
+    "ground_truth": "An immersion is a set of three related general education courses in a focused area linked by a theme or discipline, which students must complete as part of their bachelor's degree requirements. These upper-level courses meet RIT's general education requirements, and in many cases an immersion can lead to a minor."
+  },
+  {
+    "question": "What immersion options are listed on RIT Kosovo's Immersions page?",
+    "ground_truth": "Communications, Economics, Environmental Studies, History, International Relations, Legal Studies, Literature and Media, Political Science, Psychology, Public Policy, and Sociology."
+  },
+  {
+    "question": "What is the required course for the International Relations Immersion at RIT Kosovo?",
+    "ground_truth": "POLS-120, Introduction to International Relations."
+  },
+  {
+    "question": "What percentage of tuition do RIT Kosovo's Presidents Partial Scholarships cover, and what are they based on?",
+    "ground_truth": "Presidents Partial Scholarships cover 50% to 80% and are awarded based on merit (TOEFL and Institutional Math Exam scores, SAT, high school GPA, and extracurricular involvement) combined with financial need."
+  },
+  {
+    "question": "What are the interest rate and loan maturity for RIT Kosovo's undergraduate student loans through ProCredit Bank?",
+    "ground_truth": "A 0% interest rate, a 12-month loan maturity, and a 2.00% loan administration (disbursement) fee covered by the student."
+  },
+  {
+    "question": "What are the interest rate and loan maturity for RIT Kosovo's master's student loans through ProCredit Bank?",
+    "ground_truth": "A 3.9% interest rate, a loan maturity of 5 years (60 months), and a 0% loan administration fee."
+  },
+  {
+    "question": "How many current students does RIT Kosovo have, and what percentage of them are international?",
+    "ground_truth": "RIT Kosovo has 750+ current undergraduate and graduate students, of whom about 20% are international."
+  },
+  {
+    "question": "What graduate degree programs are listed on RIT Kosovo's Graduate Programs page?",
+    "ground_truth": "MSc in Professional Studies: Data Analytics, and Post-doctoral Studies."
   }
 ]
