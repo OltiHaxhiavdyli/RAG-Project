@@ -154,73 +154,52 @@ them.
 
 ## Architecture
 
-```
-                              User question
-                                    │
-                                    ▼
-                    ┌── Router (LLM classifies) ──┐
-                    ▼                              ▼
-            "vectorstore"                        "sql"
-                    │                              │
-                    ▼                              ▼
-   History-aware query reformulation      LLM writes SQL against
-                    │                      schema of data/structured.db
-                    ▼                              │
-   Query analysis: decomposition                   ▼
-    (atomic sub-questions) +           Safety checks: read-only
-    step-back (one broader question)   connection + SELECT-only
-    — skipped if the question is       validation, THEN executes
-    already simple                                │
-                    │                              ▼
-                    ▼                  Plain-language answer
-   Scope gate (checked ONCE, before      from the real result
-   decomposition): plausibly related
-   to ANY known source (source
-   catalog)? If clearly not →
-   skip straight to web search.
-   Otherwise, for each (sub-/
-   step-back) question:
-     Vector (MMR) + BM25 +
-     conditional self-query +
-     parent-document (small chunk
-     matched, larger chunk
-     returned) → rerank
-                    │
-                    ▼
-        Grade relevance (C-RAG)
-          │             │
-     sufficient    NOT sufficient
-          │             ▼
-          │      live web search → rerank
-          │             │
-          └──────┬──────┘
-                 ▼
-   Merge + dedupe across sub-questions
-                    │
-                    ▼
-        Grounded answer generation
-             + citations
-                    │
-                    ▼
-        Hallucinating? (Self-RAG) ──Yes──► Regenerate from SAME
-                    │                      context + feedback
-                    No                          │
-                    │◄─────────────────────────┘  (re-checked)
-                    ▼
-        Answers the question? ──No──► Rewrite question →
-                    │                  back to top (fresh retrieval)
-                   Yes                 (bounded: 1 rewrite by default)
-                    ▼
-                 Answer
+```mermaid
+flowchart TD
+    Q["User question"] --> Router{"Router<br/>LLM classifies"}
 
+    Router -->|"sql"| WriteSQL["LLM writes SQL against<br/>schema of data/structured.db"]
+    WriteSQL --> SQLGuard["Safety checks: read-only<br/>connection + SELECT-only<br/>validation"]
+    SQLGuard --> Execute["Execute against<br/>real database"]
+    Execute --> SQLAnswer["Plain-language answer<br/>from the real result"]
+    SQLAnswer --> Answer(["Answer"])
 
-Ingestion (either path):
-  Documents (PDF/DOCX/MD/TXT/URL) → chunk → Gemini embeddings → Chroma
-  Prose (PDF/DOCX/TXT/MD)         → ALSO parent/child split → separate Chroma collection + docstore
-  CSV/Excel/JSON                  → also flattened to text → Chroma
-  CSV/Excel                       → ALSO loaded as real tables → SQLite (for the sql route)
-  (every chunk/document id is deterministic — re-ingesting upserts, never duplicates)
+    Router -->|"vectorstore"| Reformulate["History-aware query<br/>reformulation"]
+    Reformulate --> ScopeGate{"Scope gate — checked ONCE<br/>plausibly related to ANY<br/>known source?"}
+
+    ScopeGate -->|"clearly not"| WebOnly["Live web search → rerank"]
+    WebOnly --> Merge
+
+    ScopeGate -->|"yes / unsure"| Decompose["Query analysis: decomposition<br/>+ step-back — skipped if the<br/>question is already simple"]
+    Decompose --> PerSubQ["Per sub-/step-back question:<br/>vector + BM25 + conditional<br/>self-query + parent-document<br/>→ rerank"]
+    PerSubQ --> Grade{"Grade relevance<br/>(C-RAG)"}
+
+    Grade -->|"sufficient"| Merge["Merge + dedupe<br/>across sub-questions"]
+    Grade -->|"not sufficient"| WebFallback["Live web search → rerank"]
+    WebFallback --> Merge
+
+    Merge --> Generate["Grounded answer generation<br/>+ citations"]
+    Generate --> Halluc{"Hallucinating?<br/>(Self-RAG)"}
+    Halluc -->|"yes"| Regen["Regenerate from SAME<br/>context + feedback"]
+    Regen --> Halluc
+    Halluc -->|"no"| Answers{"Answers the<br/>question?"}
+    Answers -->|"no — bounded:<br/>1 rewrite by default"| Rewrite["Rewrite question"]
+    Rewrite --> ScopeGate
+    Answers -->|"yes"| Answer
 ```
+
+```mermaid
+flowchart LR
+    Docs["Documents<br/>PDF/DOCX/MD/TXT/URL"] --> Chunk["Chunk"] --> Embed["Gemini<br/>embeddings"] --> MainStore[("Chroma")]
+    Docs -->|"prose only"| ParentSplit["Parent/child<br/>split"] --> ParentStore[("Separate Chroma<br/>collection + docstore")]
+    Struct["CSV / Excel / JSON"] -->|"flattened to text"| Embed
+    StructTable["CSV / Excel"] -->|"loaded as real tables"| SQLite[("SQLite<br/>(for the sql route)")]
+```
+
+Every chunk/document id is deterministic (hashed from source + content), so
+re-ingesting the same file **upserts in place instead of duplicating** — see
+[ENGINEERING.md's Notes on design choices](ENGINEERING.md#notes-on-design-choices)
+for the real duplication bug this fixed.
 
 ## Setup
 
