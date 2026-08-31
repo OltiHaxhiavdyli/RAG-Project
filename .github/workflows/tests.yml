@@ -24,7 +24,7 @@ jobs:
         # No GOOGLE_API_KEY/credentials configured here on purpose: the
         # live-API tests in test_pipeline.py are designed to skip cleanly
         # without one (see tests/pytest markers), so CI still exercises the
-        # other ~54 tests — ingestion, chunking, dispatch/retry logic, SQL
+        # other ~67 tests — ingestion, chunking, dispatch/retry logic, SQL
         # safety guards — with zero secret exposure and zero per-run API
         # cost on a public repo.
         run: pytest -q

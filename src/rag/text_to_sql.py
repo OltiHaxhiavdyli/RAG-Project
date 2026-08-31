@@ -15,6 +15,7 @@ directly). Two independent guards, so one being wrong isn't enough to matter:
 """
 import re
 import sqlite3
+from functools import lru_cache
 
 from langchain_community.utilities import SQLDatabase
 from langchain_classic.chains import create_sql_query_chain
@@ -68,7 +69,18 @@ def _is_safe_select(sql: str) -> bool:
     return bool(re.match(r"^\s*(SELECT|WITH)\b", sql, re.IGNORECASE))
 
 
+@lru_cache(maxsize=1)
 def get_sql_database() -> SQLDatabase:
+    # Cached: this is called on EVERY question (route_question() needs the
+    # schema to route at all, whether or not the question turns out to be
+    # SQL), not just once at startup like the CLI's build-sql-db step might
+    # suggest. Without caching, a long-lived chat session or API process
+    # opens a fresh SQLAlchemy engine + read-only sqlite connection on every
+    # single question and never closes it — a real, unbounded resource leak,
+    # not a hypothetical one, since nothing in this path ever calls
+    # engine.dispose(). The underlying file is fixed for the process
+    # (SQL_DB_PATH doesn't change at runtime), so one shared engine is both
+    # cheaper and correct — same reasoning as vectorstore.get_chroma_client().
     if not config.SQL_DB_PATH.exists():
         raise RuntimeError(
             f"{config.SQL_DB_PATH} does not exist yet. Run "

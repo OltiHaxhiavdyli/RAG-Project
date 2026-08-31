@@ -7,8 +7,8 @@ Usage:
 import argparse
 import json
 import sys
+import threading
 import types
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Generous ceiling, not a target: a normal question takes ~30-45s, and the
@@ -46,6 +46,37 @@ from ragas.run_config import RunConfig
 from src.rag.chain import get_llm
 from src.rag.pipeline import ChatSession
 from src.rag.vectorstore import collection_count, get_embeddings
+
+
+def _ask_with_timeout(session: ChatSession, question: str, timeout: float) -> dict:
+    """Run session.ask() with a real timeout on a genuinely hung call.
+
+    A ThreadPoolExecutor's `with` block calls shutdown(wait=True) on exit,
+    which blocks the main thread until the worker actually finishes — so a
+    truly hung call defeats the timeout entirely, just moving the hang to
+    the next line instead of `.result()`. A fixed-size pool compounds this:
+    with max_workers=1, one permanently-stuck worker starves every later
+    question too. A fresh daemon thread per call sidesteps both: `join()`
+    with a timeout returns even if the thread never finishes, and daemon
+    threads never block interpreter exit, so an abandoned hung call is
+    truly abandoned, not just deferred.
+    """
+    box: dict = {}
+
+    def worker() -> None:
+        try:
+            box["result"] = session.ask(question)
+        except Exception as exc:  # noqa: BLE001 — re-raised on the caller's thread
+            box["error"] = exc
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise TimeoutError(f"question timed out after {timeout}s")
+    if "error" in box:
+        raise box["error"]
+    return box["result"]
 
 
 def run_eval(dataset_path: Path) -> None:
@@ -86,10 +117,7 @@ def run_eval(dataset_path: Path) -> None:
             # resumed. Without a timeout the second case can't be recovered
             # from at all, which makes a large eval set impossible to
             # actually finish.
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                result = pool.submit(session.ask, case["question"]).result(
-                    timeout=QUESTION_TIMEOUT_SECONDS
-                )
+            result = _ask_with_timeout(session, case["question"], QUESTION_TIMEOUT_SECONDS)
         except Exception as exc:  # noqa: BLE001 — any transport/API/timeout failure
             failed.append((case["question"], type(exc).__name__))
             print(

@@ -299,7 +299,7 @@ this same `pytest -q` on every push/PR to `main` — deliberately with no
 real API key in a public repo's Actions secrets means paying for every push
 and every PR (including, with the wrong trigger, ones from forks), for a
 project this size. The 5 live-API tests skip cleanly without one — verified
-directly, not assumed: `54 passed, 5 skipped in 41s` running the exact same
+directly, not assumed: `67 passed, 5 skipped in 34s` running the exact same
 command with no credentials present — so CI still gives real signal on the
 large majority of the suite (ingestion, chunking, dispatch/retry logic, SQL
 safety guards) at zero cost and zero secret-exposure risk.

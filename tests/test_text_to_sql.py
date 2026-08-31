@@ -75,8 +75,18 @@ def test_get_sql_database_connection_is_read_only(tmp_path, monkeypatch):
     db_path = tmp_path / "out.db"
     build_structured_db(tmp_path, db_path)
 
+    # get_sql_database() is process-cached (see text_to_sql.py) since real
+    # usage calls it on every question, not once — but that means a stale
+    # entry from an earlier call (a different test, or real app startup in
+    # the same process) would silently outlive this test's tmp_path. Clear
+    # before AND after so this test neither reads nor leaves behind a cached
+    # instance pointing at a directory pytest is about to delete.
     monkeypatch.setattr(config, "SQL_DB_PATH", db_path)
-    db = get_sql_database()
+    get_sql_database.cache_clear()
+    try:
+        db = get_sql_database()
 
-    with pytest.raises(Exception, match="(?i)readonly|read-only"):
-        db.run("INSERT INTO widgets VALUES (2, 'gizmo')")
+        with pytest.raises(Exception, match="(?i)readonly|read-only"):
+            db.run("INSERT INTO widgets VALUES (2, 'gizmo')")
+    finally:
+        get_sql_database.cache_clear()

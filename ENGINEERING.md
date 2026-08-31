@@ -498,21 +498,72 @@ python scripts/evaluate.py
 
 Runs the questions in `scripts/eval_dataset.json` through the full pipeline
 and scores faithfulness, answer relevancy, context precision, and context
-recall with RAGAS. The dataset is 16 real questions with ground-truth
+recall with RAGAS. The dataset is 40 real questions with ground-truth
 answers pulled directly from the raw ingested text (not from the model's
-own prior answers, to avoid the eval grading itself), spanning both PDFs,
-the constitution, and 8 different web pages — expanded from an original 8,
-deliberately drawing the new 8 from sources the first set never touched
-(immersions, scholarships-and-loans, academics overview, graduate programs)
-rather than just adding more of the same, so the expansion buys real
-coverage breadth, not just row count.
+own prior answers, to avoid the eval grading itself) — expanded in two
+rounds, 8 → 16 → 40, each round deliberately drawing new questions from
+sources the previous set never touched (immersions, scholarships-and-loans,
+academics overview, graduate programs, TDI certifications, minors) rather
+than adding more of the same, so each expansion buys real coverage breadth,
+not just row count.
 
-**Real scores from a real run, all 16 questions scored**: faithfulness
+**Scores are now reported as mean ± 95% confidence interval, not a bare
+mean.** The 16-question run below is the last complete baseline: faithfulness
 0.93, answer relevancy 0.87, context precision 0.66, context recall 0.88 —
 up from the original 8-question run's 0.84/0.86/0.77/1.00 on faithfulness
-and relevancy, down on precision and recall. That's not noise to explain
-away; reading the per-question breakdown (not just the mean) found a real,
-concrete reason, on top of the two already-known ones below.
+and relevancy, down on precision and recall. At the time, that shift
+couldn't be judged as real or as noise — the eval only ever printed a bare
+mean. `_print_scores()` in `evaluate.py` fixes that: with the per-question
+scores in hand, the standard error of the mean (`std/√n`) gives a "minimum
+detectable shift" per metric, computed and printed alongside every run.
+Applied retroactively to that exact 8→16 comparison, it settles the question
+it was originally raised to answer: the faithfulness drop (Δ0.07) sits
+inside a ±0.129 noise floor at n=16, as does the context-precision "gain"
+(Δ0.04, ±0.199) discussed below — neither is distinguishable from which
+questions happened to land which way. The answer-relevancy drop (Δ0.05)
+is the one exception: it falls *outside* the ±0.019 threshold, and remains
+the one metric shift in this project's history that isn't explained away
+by sample noise.
+
+A fresh 40-question baseline — the reason for expanding the dataset in the
+first place, since a larger `n` narrows every one of those thresholds by
+~1.58x — has not yet been captured. Getting there needed real
+infrastructure work first, covered below, and three attempted runs were
+lost to real network failures before a fourth completed 39 of 40 questions.
+No fabricated or partial numbers are reported here; the next full run's
+output is what closes this out.
+
+**Eval harness robustness, fixed for the same reason the dataset grew.**
+`run_eval()` used to build a fresh `ChatSession` per question — the same
+cold-build cost independently reintroduced here that the latency
+benchmarks below already found and fixed — which made even a 16-question
+run take 30+ minutes and a 40-question run impractical. Now one session is
+built once, with `.history` cleared between questions. Attempting the
+40-question run surfaced two more real failures no amount of retrying
+would have fixed on their own: a transient `httpx.RemoteProtocolError` on
+the very last question discarded ~20 minutes of already-completed work
+(nothing caught it), and a separate run simply stopped advancing at
+question 21 and never resumed — a genuine hang, which a `try/except` can't
+catch since the call never returns. Fixed with per-question exception
+handling (failures are collected and reported loudly, never silently
+dropped — the same "skip, don't crash" posture as the rest of this
+project) plus a `join(timeout=300)` on a fresh daemon thread per question
+(`_ask_with_timeout()`), so a hung call is abandoned instead of blocking
+the whole run. The first version of this used a `ThreadPoolExecutor`
+instead, which looked right but wasn't: its `with` block calls
+`shutdown(wait=True)` on exit, which blocks the main thread until the
+worker actually finishes — so a genuinely hung call defeated the timeout
+entirely, just moving the hang to the next line instead of `.result()`.
+Worse, `max_workers=1` meant one permanently-stuck worker would starve
+every later question too. Caught in review, not by running it again;
+a daemon thread per call sidesteps both problems, since `join()` returns
+on timeout regardless of whether the thread ever finishes, and a daemon
+thread never blocks interpreter exit.
+
+The remaining discussion in this section — the boilerplate investigation,
+the retrieval regression, the citation-format gap, the judge-noise
+patterns — reflects the 16-question run described above, the last one
+actually completed end to end.
 
 **Attacking the low precision score — and an honest non-result.** Context
 precision (0.66) was the clear weak metric, so the first step was measuring
@@ -1145,6 +1196,37 @@ rather than relying on timing luck.
   above, since duplicate child embeddings still resolve to the same parent
   text, which `DecomposingRetriever`'s final merge already dedupes by
   `(source, content)` before it reaches the model.
+- **`get_sql_database()` was opening a fresh engine + sqlite connection on
+  every question, never closed**: `route_question()` calls it to fetch the
+  schema before every routing decision — not once at startup, as
+  `build-sql-db` being a one-off CLI step might suggest — so a long-lived
+  chat session or API process leaked one `create_engine()` + read-only
+  sqlite connection per question, unbounded, since nothing on this path
+  ever called `engine.dispose()`. Found in a final review pass, not by
+  anyone hitting resource exhaustion in practice. Fixed with
+  `@lru_cache(maxsize=1)`, the same reasoning as
+  `vectorstore.get_chroma_client()`: the underlying DB path is fixed for
+  the process, so one shared engine is both cheaper and correct. The one
+  test that monkeypatches `config.SQL_DB_PATH` to a per-test `tmp_path`
+  now explicitly clears the cache before and after, so it neither reads a
+  stale cached instance from an earlier call nor leaves one behind
+  pointing at a directory pytest is about to delete.
+- **The eval script's own hang-timeout didn't actually work**: the first
+  version wrapped each question in
+  `ThreadPoolExecutor(max_workers=1).submit(...).result(timeout=300)` —
+  looked right, verified wrong on review. A `with ThreadPoolExecutor()`
+  block calls `shutdown(wait=True)` on exit, which blocks the main thread
+  until the worker thread actually finishes; for a genuinely hung call
+  (the exact failure this was built to survive — see
+  [Evaluation](#evaluation)), that just moves the hang from `.result()` to
+  the next line. `max_workers=1` made it worse: one permanently-stuck
+  worker would have starved every later question too, since there's no
+  second thread to run them on. Fixed with a fresh daemon thread per
+  question (`_ask_with_timeout()` in `evaluate.py`) — `join(timeout)`
+  returns regardless of whether the thread ever finishes, and a daemon
+  thread never blocks interpreter exit, so an abandoned hung call is
+  actually abandoned. Caught by a second review pass reading the fix
+  itself skeptically, not by hitting the failure again live.
 - **A follow-on bug the boilerplate fix exposed immediately**: content-hash
   chunk ids handle *re-ingestion* collisions correctly (that's the point —
   same content upserts instead of duplicating), but never had to handle two
