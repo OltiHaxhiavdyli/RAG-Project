@@ -22,6 +22,25 @@ has the full depth** — every technique explained in detail, the real bugs
 found and how they were verified fixed, and the performance/latency work,
 with real before/after numbers throughout.
 
+## Screenshots
+
+Asking a subjective question the corpus can't actually answer — the
+self-correction layer keeps the model honest about what the context does
+and doesn't say, instead of guessing:
+
+![Answer honestly scoping what the context can and can't confirm](docs/screenshots/answer-honest-scope.png)
+
+Inline citations render as small numbered chips instead of raw URLs — the
+same source cited more than once reuses its number, and hovering (or
+tabbing to it) reveals the full link without cluttering the paragraph:
+
+![Hovering a citation chip reveals the full source URL](docs/screenshots/citation-hover.png)
+
+A second real question, with the source panel expanded — every citation
+traces back to an actual ingested document, not a guess:
+
+![A second answer with the sources panel expanded](docs/screenshots/answer-dishonesty-hover.png)
+
 ## What this covers
 
 | Architecture area | Implemented | Deliberately skipped |

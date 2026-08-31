@@ -21,6 +21,52 @@ const STAGE_LABELS = {
   rewriting_question: "Rewriting the question for a better retrieval pass",
 };
 
+// Same shape as pipeline.py's _CITATION_PATTERN — matches [source: X] or
+// bare [X], so a citation renders as a chip regardless of which form the
+// model used.
+const CITATION_PATTERN = /\[(?:source:\s*)?([^\]]+)\]/g;
+
+// Raw inline citations (full URLs/filenames in brackets) are correct but
+// unreadable mid-paragraph — see the ChatGPT-style numbered chip instead:
+// one small hoverable badge per distinct source, same number reused for a
+// source cited more than once, full text available on hover/focus rather
+// than always visible.
+function renderContentWithCitations(container, content) {
+  const citationNumbers = new Map();
+  let nextNumber = 1;
+  let lastIndex = 0;
+  let match;
+  CITATION_PATTERN.lastIndex = 0;
+  while ((match = CITATION_PATTERN.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      container.appendChild(document.createTextNode(content.slice(lastIndex, match.index)));
+    }
+
+    const source = match[1].trim();
+    if (!citationNumbers.has(source)) citationNumbers.set(source, nextNumber++);
+
+    const chip = document.createElement("span");
+    chip.className = "citation-chip";
+    chip.tabIndex = 0;
+
+    const numEl = document.createElement("span");
+    numEl.className = "citation-num";
+    numEl.textContent = String(citationNumbers.get(source));
+    chip.appendChild(numEl);
+
+    const tooltip = document.createElement("span");
+    tooltip.className = "citation-tooltip";
+    tooltip.textContent = source;
+    chip.appendChild(tooltip);
+
+    container.appendChild(chip);
+    lastIndex = CITATION_PATTERN.lastIndex;
+  }
+  if (lastIndex < content.length) {
+    container.appendChild(document.createTextNode(content.slice(lastIndex)));
+  }
+}
+
 const messagesEl = document.getElementById("messages");
 const form = document.getElementById("chat-form");
 const input = document.getElementById("question-input");
@@ -46,7 +92,11 @@ function renderMessage(m) {
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
-  bubble.textContent = m.content;
+  if (m.role === "assistant" && !m.error) {
+    renderContentWithCitations(bubble, m.content);
+  } else {
+    bubble.textContent = m.content;
+  }
   wrap.appendChild(bubble);
 
   if (m.role === "assistant" && (m.route || (m.sources && m.sources.length))) {
