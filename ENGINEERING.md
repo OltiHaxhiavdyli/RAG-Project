@@ -668,6 +668,71 @@ again just to confirm nothing about the *results* changed — a real cost
 worth paying at some point, but not worth spending on a pure speed
 improvement to a script the results of this exact run already stand on.
 
+## Retrieval tuning
+
+Context precision was the weak metric, and [boilerplate stripping](#evaluation)
+didn't clearly move it. The obvious next lever was `RETRIEVER_TOP_K` and
+`RERANK_TOP_K` — but tuning them against the RAGAS eval would have been
+useless, for a reason worth stating plainly: **that eval can't measure what
+these knobs do.** It wraps retrieval in a router, scope gate, decomposition,
+web fallback, generation, and an LLM-as-judge scorer, all non-deterministic.
+A ±0.04 mean shift over 16 questions is indistinguishable from run-to-run
+noise there — already demonstrated in this project, where the same question
+scored context precision 0.5 in one run and 1.0 in the next with *zero* code
+changes between them.
+
+So the tuning got its own benchmark. **Retrieval itself is deterministic** —
+embeddings, BM25, and cross-encoder reranking all return identical results
+for identical input; the noise lives entirely in the LLM layers above. The
+benchmark labels each of the 16 real eval questions with the source that
+actually answers it, invokes *only* the local ensemble + reranker (no router,
+scope gate, decomposition, web fallback, or generation), and measures what
+fraction of returned chunks come from the right source. Zero LLM calls in the
+loop, so a parameter sweep is genuinely apples-to-apples and repeatable.
+
+Sweeping seven configurations:
+
+| `RETRIEVER_TOP_K` | `RERANK_TOP_K` | precision | hit@k |
+|---|---|---|---|
+| 20 | 5 | 0.625 | 1.000 |
+| **10** | **5** | **0.650** | **1.000** |
+| 40 | 5 | 0.600 | 1.000 |
+| 20 | 3 | 0.771 | 1.000 |
+| 10 | 3 | 0.771 | 1.000 |
+| 20 | 8 | 0.539 | 1.000 |
+| 40 | 8 | 0.508 | 1.000 |
+
+**The headline result is a trap, and catching it was the point.**
+`RERANK_TOP_K=3` scores 0.771 — a 23% relative precision gain, by far the
+best number in the table. Shipping it on that basis would have been wrong.
+Precision is a *fraction*, so it rises trivially when you simply return
+fewer chunks; the honest check is the absolute count of correct-source
+chunks. Measured: going from 5 to 3 dropped **13 correct chunks (50 → 37)
+across 10 of the 16 questions**. It wasn't removing noise, it was removing
+signal — the denominator shrank. That would have made answers measurably
+less complete while the metric looked better, and it would have quietly
+undone the [fuller-answer work](#self-correcting-generation) done
+deliberately earlier. Textbook Goodhart's law, caught only because the
+absolute count was checked and not just the ratio. `RERANK_TOP_K` stays at
+5.
+
+**The real win was the unglamorous one.** `RETRIEVER_TOP_K` 20 → 10, with
+`RERANK_TOP_K` untouched: precision 0.625 → 0.650, and the correct-chunk
+count went **up**, 50 → 52 — three questions gained a correct chunk, one
+lost one. Same five chunks still reach the LLM, so nothing is lost
+downstream, and the initial-recall stage does less work (fewer candidates to
+fetch and rerank). The mechanism makes sense in hindsight: a narrower
+candidate pool gives the cross-encoder fewer near-miss distractors to
+mistakenly rank above genuinely relevant content — more candidates is not
+strictly better. 40 was worse on both counts, confirming the direction
+rather than just the single step.
+
+Honest scope: +0.025 precision is a small win, and 16 questions is a small
+benchmark. It's a *real* win rather than a noise artifact — retrieval
+determinism is what buys that claim — but it's not the fix that takes
+precision from 0.66 to 0.9. The bigger remaining lever is corpus/chunking
+quality, not these two knobs, which are now measured rather than guessed.
+
 ## Performance
 
 Stacking every technique has a real cost: an in-scope question still fires

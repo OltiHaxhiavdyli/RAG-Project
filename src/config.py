@@ -30,7 +30,21 @@ COLLECTION_NAME = os.environ.get("COLLECTION_NAME", "rag_docs")
 CHUNK_SIZE = int(os.environ.get("CHUNK_SIZE", 1000))
 CHUNK_OVERLAP = int(os.environ.get("CHUNK_OVERLAP", 150))
 
-RETRIEVER_TOP_K = int(os.environ.get("RETRIEVER_TOP_K", 20))
+# Candidates each ensemble member fetches BEFORE reranking. Tuned against a
+# deterministic retrieval-only benchmark (see ENGINEERING.md's Retrieval
+# tuning section) rather than by feel: 10 measured strictly better than the
+# previous 20 — precision 0.625 -> 0.650 AND more correct-source chunks
+# surviving into the final context (50 -> 52), because a narrower candidate
+# pool gives the cross-encoder fewer near-miss distractors to rank above
+# genuinely relevant content. 40 was worse on both counts.
+RETRIEVER_TOP_K = int(os.environ.get("RETRIEVER_TOP_K", 10))
+
+# Chunks that actually reach the LLM after reranking. Deliberately left at
+# 5: lowering it to 3 scores BETTER on precision (0.771) but only by
+# dropping 13 real correct-source chunks across 10 of 16 benchmark
+# questions — the fraction rises because the denominator shrinks, not
+# because noise left. That's optimizing the metric while making answers
+# less complete; see ENGINEERING.md for the measurement.
 RERANK_TOP_K = int(os.environ.get("RERANK_TOP_K", 5))
 
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
