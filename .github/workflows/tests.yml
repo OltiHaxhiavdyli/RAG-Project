@@ -1,0 +1,30 @@
+name: Tests
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        # No GOOGLE_API_KEY/credentials configured here on purpose: the
+        # live-API tests in test_pipeline.py are designed to skip cleanly
+        # without one (see tests/pytest markers), so CI still exercises the
+        # other ~54 tests — ingestion, chunking, dispatch/retry logic, SQL
+        # safety guards — with zero secret exposure and zero per-run API
+        # cost on a public repo.
+        run: pytest -q

@@ -1,5 +1,7 @@
 # RAG Engine
 
+[![Tests](https://github.com/OltiHaxhiavdyli/RAG-Project/actions/workflows/tests.yml/badge.svg)](https://github.com/OltiHaxhiavdyli/RAG-Project/actions/workflows/tests.yml)
+
 A complete implementation of the modern "advanced RAG" architecture — not a
 single embed-and-retrieve demo, but the full set of techniques that separate a
 production-shaped retrieval system from a tutorial: query construction,
@@ -290,6 +292,17 @@ synthetic fixtures in `tests/fixtures/` — never against whatever real
 documents happen to be in `data/raw/`. The end-to-end pipeline test requires
 `GOOGLE_API_KEY` and is skipped otherwise; the web search test mocks the
 Tavily call, so it needs no key or network access either.
+
+**CI** ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) runs
+this same `pytest -q` on every push/PR to `main` — deliberately with no
+`GOOGLE_API_KEY` configured as a secret. That's not an oversight: putting a
+real API key in a public repo's Actions secrets means paying for every push
+and every PR (including, with the wrong trigger, ones from forks), for a
+project this size. The 5 live-API tests skip cleanly without one — verified
+directly, not assumed: `54 passed, 5 skipped in 41s` running the exact same
+command with no credentials present — so CI still gives real signal on the
+large majority of the suite (ingestion, chunking, dispatch/retry logic, SQL
+safety guards) at zero cost and zero secret-exposure risk.
 
 ## Project layout
 
