@@ -512,7 +512,52 @@ coverage breadth, not just row count.
 up from the original 8-question run's 0.84/0.86/0.77/1.00 on faithfulness
 and relevancy, down on precision and recall. That's not noise to explain
 away; reading the per-question breakdown (not just the mean) found a real,
-concrete reason, on top of the two already-known ones below:
+concrete reason, on top of the two already-known ones below.
+
+**Attacking the low precision score — and an honest non-result.** Context
+precision (0.66) was the clear weak metric, so the first step was measuring
+*why* rather than guessing. A quick data-driven scan (find lines repeated
+verbatim across many pages — definitionally site chrome, not content) found
+that **51% of all scraped web line-content was boilerplate**: the same ~100
+nav-menu and footer-sitemap lines duplicated across all 16 ingested pages.
+Every boilerplate-heavy chunk competing for a top-K retrieval slot is a slot
+not spent on real content, so this looked like a direct, mechanical cause.
+
+Fixed with `loaders.py`'s `strip_shared_boilerplate()`, detected from the
+data rather than a hardcoded phrase list so it generalizes to any site, and
+deliberately conservative (a line must appear on ≥50% of pages, and batches
+under 4 pages are skipped entirely, since "1 of 2 pages" is 50% but means
+nothing). Re-ingesting the same 16 URLs through it cut them from **398 to
+208 chunks — a 48% reduction**, matching the measured 51% almost exactly.
+
+Then the honest part: **re-running the full eval did NOT clearly pay off.**
+Context precision moved 0.656 → 0.696 (+0.04, the right direction but
+modest), while the other three metrics moved *down*: faithfulness 0.93 →
+0.86, relevancy 0.87 → 0.82, recall 0.88 → 0.81. With only 16 questions and
+LLM/retrieval non-determinism already demonstrated in this very project (the
+TOEFL question scored context precision 0.5 in one run and 1.0 in the next
+with *zero* code changes between them), a single row swinging moves any mean
+by ~6 points — so these deltas can't be cleanly attributed to the
+boilerplate change in either direction. Reporting the +0.04 as "fixed
+precision" would be reading signal into noise.
+
+The boilerplate stripping is kept anyway, on its own merits rather than on
+this eval: 48% fewer chunks for identical real content is a measured,
+verifiable win for index size, embedding cost, and retrieval-slot
+competition, covered by five unit tests, whatever a 16-question eval's mean
+happens to say that run. But "precision is fixed" is not a claim this run
+supports, and the metric stays a known weak point.
+
+**A flaw in the eval data itself, found by the same re-run**: the
+"% international students" question's ground truth ("about 20%") came from
+the academics-overview page's `20 / of our current students are
+Internationals` — which has no `%` sign and is genuinely ambiguous. On the
+re-run, retrieval surfaced a *different* RIT page stating **12%**
+international, so the system answered 12% and scored 0 precision against my
+own questionable reference. The system may well have been more right than
+the eval. Worth flagging because it's the failure mode LLM-graded evals are
+most prone to: a wrong-looking score that's actually a bad ground truth, not
+a bad answer.
 
 - **A genuine retrieval regression, caught by the eval, not assumed away**:
   the "two W's" scholarship-reduction question — part of the original 8,
@@ -1035,3 +1080,17 @@ rather than relying on timing luck.
   above, since duplicate child embeddings still resolve to the same parent
   text, which `DecomposingRetriever`'s final merge already dedupes by
   `(source, content)` before it reaches the model.
+- **A follow-on bug the boilerplate fix exposed immediately**: content-hash
+  chunk ids handle *re-ingestion* collisions correctly (that's the point —
+  same content upserts instead of duplicating), but never had to handle two
+  chunks colliding **inside one batch**. Stripping shared nav/footer lines
+  reduced several thin pages to byte-identical residual text, so they hashed
+  to the same id in a single ingest call — and Chroma rejects a batch
+  containing a duplicate id outright (`DuplicateIDError`) rather than
+  treating it as an upsert, failing the entire run. Caught the first time
+  the re-ingest was actually executed, not by inspection. Fixed by deduping
+  by id in `vectorstore.add_documents()` before adding, which is the correct
+  behavior regardless: two chunks with the same content hash *are* the same
+  chunk by this project's own definition of chunk identity. Two regression
+  tests, including one confirming chunks with no id (`None`) are never
+  collapsed together.

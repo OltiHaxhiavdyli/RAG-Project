@@ -1,7 +1,9 @@
-"""vectorstore.get_chroma_client() tests. No API key needed — stubs
-chromadb.PersistentClient, never touches a real store."""
+"""vectorstore tests. No API key needed — stubs chromadb.PersistentClient
+and the store itself, never touches a real store."""
 import threading
 import time
+
+from langchain_core.documents import Document
 
 from src.rag import vectorstore
 
@@ -57,3 +59,45 @@ def test_get_chroma_client_reuses_existing_instance(monkeypatch):
     monkeypatch.setattr(vectorstore.chromadb, "PersistentClient", fail_if_called)
 
     assert vectorstore.get_chroma_client() is sentinel
+
+
+class _RecordingStore:
+    def __init__(self):
+        self.added = []
+
+    def add_documents(self, docs):
+        self.added.extend(docs)
+
+
+def test_add_documents_dedupes_chunks_sharing_an_id(monkeypatch):
+    """Real bug, surfaced the moment boilerplate stripping landed: chunk ids
+    are a content hash, so two chunks from different pages whose text became
+    byte-identical (after shared nav/footer lines were stripped) collide —
+    and Chroma rejects a batch containing the same id twice outright with
+    DuplicateIDError rather than upserting. Deduping by id before adding is
+    correct anyway: they're the same chunk by this project's own definition
+    of chunk identity."""
+    store = _RecordingStore()
+    monkeypatch.setattr(vectorstore, "get_vectorstore", lambda: store)
+
+    a = Document(page_content="same text", metadata={"source": "page-a"}, id="dup")
+    b = Document(page_content="same text", metadata={"source": "page-b"}, id="dup")
+    c = Document(page_content="different", metadata={"source": "page-c"}, id="unique")
+
+    vectorstore.add_documents([a, b, c])
+
+    assert [d.id for d in store.added] == ["dup", "unique"]  # b dropped, order kept
+
+
+def test_add_documents_keeps_chunks_without_ids(monkeypatch):
+    """An id of None isn't a collision — those chunks must all still be
+    added, not silently collapsed into one."""
+    store = _RecordingStore()
+    monkeypatch.setattr(vectorstore, "get_vectorstore", lambda: store)
+
+    docs = [Document(page_content=f"text {i}") for i in range(3)]
+    assert all(d.id is None for d in docs)
+
+    vectorstore.add_documents(docs)
+
+    assert len(store.added) == 3

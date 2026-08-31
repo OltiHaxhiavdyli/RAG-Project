@@ -78,9 +78,32 @@ def get_vectorstore() -> Chroma:
 
 
 def add_documents(chunks: list[Document]) -> Chroma:
+    """Dedupes by chunk id before adding. Chunk ids are a content hash (see
+    chunking.py's _stable_chunk_id) so re-ingesting the same content upserts
+    instead of duplicating — but two chunks from DIFFERENT pages can still
+    hash identically when their text really is identical, and Chroma rejects
+    a batch containing the same id twice outright (`DuplicateIDError`)
+    rather than treating it as an upsert.
+
+    Not hypothetical: this surfaced the moment boilerplate stripping
+    (loaders.py's strip_shared_boilerplate) landed. Removing shared nav/
+    footer lines left several near-empty pages reduced to byte-identical
+    residual text, which collided inside a single ingest batch and failed
+    the whole run. Upserting once per unique id is the correct behavior
+    anyway — they're genuinely the same chunk by this project's own
+    definition of chunk identity."""
+    seen: set[str] = set()
+    unique: list[Document] = []
+    for chunk in chunks:
+        if chunk.id is not None:
+            if chunk.id in seen:
+                continue
+            seen.add(chunk.id)
+        unique.append(chunk)
+
     store = get_vectorstore()
-    for i in range(0, len(chunks), EMBED_BATCH_SIZE):
-        store.add_documents(chunks[i : i + EMBED_BATCH_SIZE])
+    for i in range(0, len(unique), EMBED_BATCH_SIZE):
+        store.add_documents(unique[i : i + EMBED_BATCH_SIZE])
     return store
 
 
